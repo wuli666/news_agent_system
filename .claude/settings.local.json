@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile:*)",
+      "Bash(python test_refactored_workflow.py:*)",
+      "Bash(source ~/miniconda3/bin/activate)",
+      "Bash(conda activate:*)",
+      "Bash(python main.py:*)",
+      "Bash(/home/djj/anaconda3/envs/py3111/bin/python:*)",
+      "Bash(unset:*)",
+      "Bash(timeout 60 /home/djj/anaconda3/envs/py3111/bin/python:*)",
+      "Bash(timeout 90 /home/djj/anaconda3/envs/py3111/bin/python:*)",
+      "Bash(timeout 120 /home/djj/anaconda3/envs/py3111/bin/python:*)",
+      "Bash(find:*)",
+      "Bash(/home/djj/anaconda3/envs/py3111/bin/pip show:*)",
+      "Bash(python:*)",
+      "Bash(pip show:*)",
+      "Bash(timeout 60 python:*)",
+      "Bash(pip install:*)",
+      "Bash(python3:*)",
+      "Bash(cat:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

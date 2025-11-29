@@ -8,8 +8,10 @@ from .news_tools import (
     get_historical_news,
     get_available_dates,
     fetch_article,
+    tavily_extract,
     ALL_NEWS_TOOLS,
 )
+from .python_repl_tool import python_repl_tool
 
 __all__ = [
     "get_latest_news",
@@ -18,5 +20,7 @@ __all__ = [
     "get_historical_news",
     "get_available_dates",
     "fetch_article",
+    "tavily_extract",
     "ALL_NEWS_TOOLS",
+    "python_repl_tool",
 ]

@@ -21,6 +21,7 @@ from ..services.newsnow_service import NewsNowService
 from ..utils.history_storage import get_storage
 from ..utils.news_dedup import deduplicate_news
 
+from ..config.settings import settings
 
 # Create a shared service instance
 _news_service = NewsNowService()
@@ -263,6 +264,99 @@ async def fetch_article(url: str, max_length: int = 3000) -> Dict[str, Any]:
         return {"success": False, "url": url, "error": str(e)}
 
 
+@tool
+async def tavily_search(
+    query: str,
+    max_results: int = 5,
+    include_answer: bool = False,
+    include_images: bool = True,
+    include_image_descriptions: bool = True,
+) -> Dict[str, Any]:
+    """
+    使用 Tavily 搜索引擎补充信息。
+
+    Args:
+        query: 搜索关键词或问题
+        max_results: 返回最多多少条结果
+        include_answer: 是否让 Tavily 同时生成摘要答案
+        include_images: 是否返回图片 URL
+        include_image_descriptions: 是否返回图片描述
+
+    Returns:
+        Tavily 的原始搜索结果
+    """
+    api_key = settings.TAVILY_API_KEY
+    endpoint = settings.TAVILY_ENDPOINT
+    if not api_key:
+        return {"success": False, "error": "未配置 TAVILY_API_KEY，无法调用 Tavily 搜索"}
+
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+            resp = await client.post(
+                endpoint,
+                json={
+                    "api_key": api_key,
+                    "query": query,
+                    "max_results": max_results,
+                    "include_answer": include_answer,
+                    "include_images": include_images,
+                    "include_image_descriptions": include_image_descriptions,
+                },
+                headers={"Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return {"success": True, "data": data}
+    except httpx.TimeoutException:
+        return {"success": False, "error": "Tavily 请求超时"}
+    except Exception as e:
+        return {"success": False, "error": f"Tavily 请求失败: {e}"}
+
+
+@tool
+async def tavily_extract(
+    urls: List[str] | str,
+    include_images: bool = True,
+    include_favicon: bool = False,
+    extract_depth: str = "advanced",
+    fmt: str = "markdown",
+    timeout: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    使用 Tavily Extract 直接抓取指定 URL 内容，可返回图片列表。
+    """
+    api_key = settings.TAVILY_API_KEY
+    if not api_key:
+        return {"success": False, "error": "未配置 TAVILY_API_KEY，无法调用 Tavily Extract"}
+
+    url_list = urls if isinstance(urls, list) else [urls]
+    payload: Dict[str, Any] = {
+        "urls": url_list,
+        "include_images": include_images,
+        "include_favicon": include_favicon,
+        "extract_depth": extract_depth,
+        "format": fmt,
+    }
+    if timeout:
+        payload["timeout"] = max(1.0, min(float(timeout), 60.0))
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.post("https://api.tavily.com/extract", json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            return {"success": True, "data": data}
+    except httpx.TimeoutException:
+        return {"success": False, "error": "Tavily Extract 请求超时"}
+    except Exception as e:
+        return {"success": False, "error": f"Tavily Extract 请求失败: {e}"}
+
+
 # Export all tools as a list for easy import
 ALL_NEWS_TOOLS = [
     get_latest_news,  # 已内置去重功能
@@ -271,4 +365,6 @@ ALL_NEWS_TOOLS = [
     get_historical_news,
     get_available_dates,
     fetch_article,
+    tavily_search,
+    tavily_extract,
 ]

@@ -24,6 +24,7 @@ DEFAULT_PLATFORM_CONFIG: List[Tuple[str, str]] = [
     ("douyin", "抖音热点"),
     ("zhihu", "知乎热榜"),
     ("bilibili-hot-search", "Bilibili 热搜"),
+    ("xueqiu", "雪球热榜"),
 ]
 
 STOPWORDS = {
@@ -118,11 +119,18 @@ class NewsNowService:
     ) -> List[Dict[str, Any]]:
         """Fetch raw news list for a single platform."""
         url = f"{self.base_url}/api/s"
-        params = {"id": platform.platform_id, "latest": ""}
+        params = {"id": platform.platform_id}
         response = await client.get(url, params=params, headers=self.default_headers)
         response.raise_for_status()
         payload = response.json()
         items = payload.get("items", [])
+        if not items:
+            logger.warning(
+                "NewsNow platform %s returned empty list (status %s). Payload keys: %s",
+                platform.platform_id,
+                response.status_code,
+                list(payload.keys()),
+            )
 
         formatted: List[Dict[str, Any]] = []
         for rank, item in enumerate(items[:per_platform_limit], start=1):
@@ -153,6 +161,7 @@ class NewsNowService:
 
         per_platform_limit = max(1, min(self.per_platform_limit, limit))
         items: List[Dict[str, Any]] = []
+        platform_items: dict[str, List[Dict[str, Any]]] = {}
         errors: List[str] = []
 
         async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
@@ -167,10 +176,38 @@ class NewsNowService:
                 logger.error("Failed to load %s: %s", platform.platform_id, result)
                 errors.append(platform.platform_id)
                 continue
-            items.extend(result)
+            count = len(result or [])
+            sample_title = result[0].get("title") if count else ""
+            logger.info(
+                "NewsNow platform fetched: %s -> %s items%s",
+                platform.platform_id,
+                count,
+                f" | sample: {sample_title}" if sample_title else "",
+            )
+            sorted_result = sorted(result, key=lambda item: item.get("rank", 0))
+            platform_items[platform.platform_id] = sorted_result
+            items.extend(sorted_result)
 
-        items.sort(key=lambda item: (item["platform_id"], item["rank"]))
-        return items[:limit], errors
+        # If total items are within limit, keep sorted by platform + rank for stability
+        if len(items) <= limit:
+            items.sort(key=lambda item: (item["platform_id"], item.get("rank", 0)))
+            return items, errors
+
+        # Otherwise, interleave by platform to retain cross-platform coverage
+        merged: List[Dict[str, Any]] = []
+        ordered_platforms = [p.platform_id for p in platforms]
+        buckets = {pid: list(platform_items.get(pid, [])) for pid in ordered_platforms}
+
+        while len(merged) < limit and any(buckets.values()):
+            for pid in ordered_platforms:
+                bucket = buckets.get(pid) or []
+                if not bucket:
+                    continue
+                merged.append(bucket.pop(0))
+                if len(merged) >= limit:
+                    break
+
+        return merged[:limit], errors
 
     async def get_latest_news(
         self,

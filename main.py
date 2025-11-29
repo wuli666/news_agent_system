@@ -5,7 +5,7 @@ import asyncio
 import logging
 import sys
 from datetime import datetime
-from src.graph.workflow import create_workflow
+from src.graph.workflow import create_workflow  # Using refactored workflow
 from src.config.settings import settings
 from src.graph.types import State
 
@@ -53,16 +53,41 @@ async def run_news_collection(
         "date": date,
         "iteration": 0,
         "max_iterations": max_iterations or settings.MAX_ITERATIONS,
+        "news_pool": [],
+        "news_pool_cursor": 0,
+        "latest_news_batch": [],
+        "assigned_news": [],
+        "text_batch": [],
+        "video_batch": [],
         "text_news": [],
         "video_news": [],
         "text_analysis": None,
         "video_analysis": None,
+        "text_relationship_graph": None,
+        "text_sentiment": None,
+        "text_reflection": None,
+        "timeline_analysis": None,
+        "trend_analysis": None,
+        "timeline_chart_path": None,
+        "final_report": None,
+        "trending_keywords": None,
+        "optimized_query": None,
+        "supervisor_questions": [],
+        "information_gaps": [],
+        "text_team_cycle_count": 0,
+        "analysis_gap_pending": None,
+        "gap_fill_mode": False,
+        "skip_sentiment_relationship": False,
+        "daily_papers": [],
         "text_tools": None,  # Will be preloaded by coordinator
         "video_tools": None,  # Will be preloaded by coordinator
+        "research_tools": None,  # Will be preloaded by coordinator
         "supervisor_decision": "",
         "supervisor_feedback": "",
         "quality_score": 0.0,
-        "final_report": None,
+        "last_agent": "",
+        "research_notes": [],
+        "news_images": {},
         "started_at": None,
         "completed_at": None,
     }
@@ -75,8 +100,14 @@ async def run_news_collection(
     print()
     
     try:
-        # Run workflow
-        final_state = await workflow.ainvoke(initial_state)
+        # Run workflow with higher recursion limit
+        # LangGraph 的 recursion_limit 按节点调用计数，分析内层循环一轮就有
+        # research/sentiment/relationship/reflect 等 4+ 节点，叠加 3 轮内层
+        # 和多次外层迭代，需给更高上限避免误报。
+        config = {
+            "recursion_limit": max(100, initial_state["max_iterations"] * 30)
+        }
+        final_state = await workflow.ainvoke(initial_state, config=config)
         
         # Display results
         print()
