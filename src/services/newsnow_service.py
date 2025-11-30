@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from src.utils.parsers import mining_from_serch
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -144,8 +146,22 @@ class NewsNowService:
                 "retrieved_at": datetime.now(timezone.utc).isoformat(),
             }
             if include_url:
-                news_item["url"] = item.get("url") or item.get("mobileUrl")
+                mining_result = await mining_from_serch(
+                    platform.platform_id,
+                    client,
+                    self.default_headers,
+                    item.get("url") or item.get("mobileUrl"),
+                    limit=1,
+                )
+
+                if mining_result and len(mining_result) > 0:
+                    news_item["url"] = mining_result[0].get("url")
+                    news_item["img"] = mining_result[0].get("img", None)
+                else:
+                    news_item["url"] = item.get("url")
+                    news_item["img"] = None
                 news_item["mobile_url"] = item.get("mobileUrl")
+                
             formatted.append(news_item)
 
         return formatted
