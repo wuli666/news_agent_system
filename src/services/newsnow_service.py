@@ -152,6 +152,8 @@ class NewsNowService:
                     self.default_headers,
                     item.get("url") or item.get("mobileUrl"),
                     limit=1,
+                    use_browser=False,  # 优先使用 HTTP 请求，检测到验证码时自动切换浏览器
+                    interactive=True,   # 浏览器模式下启用交互式验证码处理
                 )
 
                 if mining_result and len(mining_result) > 0:
