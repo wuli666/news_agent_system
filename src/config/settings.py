@@ -40,6 +40,8 @@ class Settings:
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
     TAVILY_ENDPOINT = os.getenv("TAVILY_ENDPOINT", "https://api.tavily.com/search")
 
+    # interactive crawler
+    ENABLE_INTERACTIVE_CRAWLER: bool = os.getenv("ENABLE_INTERACTIVE_CRAWLER", "false").lower() == "true"
     # Video Platform Recognition
     VIDEO_PLATFORMS = os.getenv(
         "VIDEO_PLATFORMS",

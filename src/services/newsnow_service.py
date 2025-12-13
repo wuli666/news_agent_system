@@ -14,10 +14,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from src.utils.parsers import mining_from_serch
+from src.config.settings import settings
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+print(settings.ENABLE_INTERACTIVE_CRAWLER)
 
 DEFAULT_PLATFORM_CONFIG: List[Tuple[str, str]] = [
     ("toutiao", "今日头条"),
@@ -153,7 +156,7 @@ class NewsNowService:
                     item.get("url") or item.get("mobileUrl"),
                     limit=1,
                     use_browser=False,  # 优先使用 HTTP 请求，检测到验证码时自动切换浏览器
-                    interactive=True,   # 浏览器模式下启用交互式验证码处理
+                    interactive=bool(settings.ENABLE_INTERACTIVE_CRAWLER),   # 浏览器模式下启用交互式验证码处理
                 )
 
                 if mining_result and len(mining_result) > 0:

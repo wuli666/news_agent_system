@@ -254,6 +254,7 @@ NEWSNOW_BASE_URL=https://newsnow.busiyi.world
 NEWSNOW_PER_PLATFORM_LIMIT=30              # 单平台限制
 NEWSNOW_MAX_ITEMS=200                      # 总条数上限
 NEWSNOW_PLATFORMS=toutiao:今日头条,baidu:百度热搜,...
+ENABLE_INTERACTIVE_CRAWLER=false            # 控制是否使用爬虫直接爬取到文章（开启：true 需要手动处理网页安全检测，关闭：false 直接返回整体热搜url）
 
 # ===== 研究工具 =====
 TAVILY_API_KEY=your-tavily-key             # 可选：深度搜索增强

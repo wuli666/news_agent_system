@@ -345,6 +345,12 @@ async def mining_from_serch(platform: str, client: httpx.AsyncClient, header: di
         # 检查是否触发了安全验证
         final_url = str(response.url)
         if _is_security_challenge(html_content, final_url):
+            # 如果 interactive 为 False，则不切换到浏览器模式
+            if not interactive:
+                print("⚠️  检测到安全验证，但 interactive=False，返回原始 URL")
+                mining_results.append({"url": url})
+                return mining_results
+            
             print("⚠️  检测到安全验证，自动切换到浏览器模式...")
             return await mining_from_serch_with_browser(platform, url, limit, interactive=interactive)
         
@@ -362,6 +368,10 @@ async def mining_from_serch(platform: str, client: httpx.AsyncClient, header: di
     except httpx.HTTPStatusError as e:
         # HTTP 状态错误，可能是反爬虫机制
         print(f"⚠️  HTTP 请求失败 (状态码 {e.response.status_code})，切换到浏览器模式...")
+        if interactive is False:
+            print("⚠️  interactive=False，返回原始 URL")
+            mining_results.append({"url": url})
+            return mining_results
         return await mining_from_serch_with_browser(platform, url, limit, interactive=interactive)
         
     except Exception as e:
@@ -405,7 +415,8 @@ async def main():
         
         print("\n测试浏览器自动化模式（推荐，可绕过验证码）：")
         print("💡 如果遇到验证码，浏览器窗口会自动打开，请手动完成验证\n")
-        results_browser = await mining_from_serch("baidu", client, default_headers, test_url, limit=1, use_browser=True, interactive=True)
+        results_browser = await mining_from_serch("baidu", client, default_headers, test_url, limit=1, use_browser=False, interactive=False
+                                                  )
         for item in results_browser:
             print(item)
 
