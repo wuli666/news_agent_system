@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from src.utils.parsers import mining_from_serch
 from src.config.settings import settings
+from src.utils.progress import SimpleSpinner
 
 import httpx
 
@@ -138,36 +139,45 @@ class NewsNowService:
             )
 
         formatted: List[Dict[str, Any]] = []
-        for rank, item in enumerate(items[:per_platform_limit], start=1):
-            news_item = {
-                "platform_id": platform.platform_id,
-                "platform_name": platform.display_name,
-                "title": item.get("title", "").strip(),
-                "rank": rank,
-                "source": item.get("source") or platform.display_name,
-                "category": item.get("category") or "text",
-                "retrieved_at": datetime.now(timezone.utc).isoformat(),
-            }
-            if include_url:
-                mining_result = await mining_from_serch(
-                    platform.platform_id,
-                    client,
-                    self.default_headers,
-                    item.get("url") or item.get("mobileUrl"),
-                    limit=1,
-                    use_browser=False,  # 优先使用 HTTP 请求，检测到验证码时自动切换浏览器
-                    interactive=bool(settings.ENABLE_INTERACTIVE_CRAWLER),   # 浏览器模式下启用交互式验证码处理
-                )
 
-                if mining_result and len(mining_result) > 0:
-                    news_item["url"] = mining_result[0].get("url")
-                    news_item["img"] = mining_result[0].get("img", None)
-                else:
-                    news_item["url"] = item.get("url")
-                    news_item["img"] = None
-                news_item["mobile_url"] = item.get("mobileUrl")
-                
-            formatted.append(news_item)
+        # Use spinner for URL mining progress
+        total_items = len(items[:per_platform_limit])
+        with SimpleSpinner(f"⛏️  Mining URLs from {platform.display_name}") as spinner:
+            for rank, item in enumerate(items[:per_platform_limit], start=1):
+                news_item = {
+                    "platform_id": platform.platform_id,
+                    "platform_name": platform.display_name,
+                    "title": item.get("title", "").strip(),
+                    "rank": rank,
+                    "source": item.get("source") or platform.display_name,
+                    "category": item.get("category") or "text",
+                    "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if include_url:
+                    title_preview = item.get("title", "")[:40]
+                    url_preview = (item.get("url") or item.get("mobileUrl") or "")[:50]
+                    spinner.update(f"[{rank}/{total_items}] {title_preview}... | {url_preview}...")
+
+                    mining_result = await mining_from_serch(
+                        platform.platform_id,
+                        client,
+                        self.default_headers,
+                        item.get("url") or item.get("mobileUrl"),
+                        limit=1,
+                        use_browser=False,  # 优先使用 HTTP 请求，检测到验证码时自动切换浏览器
+                        interactive=bool(settings.ENABLE_INTERACTIVE_CRAWLER),   # 浏览器模式下启用交互式验证码处理
+                        silent=True,  # 静默模式，不输出中间日志
+                    )
+
+                    if mining_result and len(mining_result) > 0:
+                        news_item["url"] = mining_result[0].get("url")
+                        news_item["img"] = mining_result[0].get("img", None)
+                    else:
+                        news_item["url"] = item.get("url")
+                        news_item["img"] = None
+                    news_item["mobile_url"] = item.get("mobileUrl")
+
+                formatted.append(news_item)
 
         return formatted
 

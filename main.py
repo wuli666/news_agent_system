@@ -8,12 +8,10 @@ from datetime import datetime
 from src.graph.workflow import create_workflow  # Using refactored workflow
 from src.config.settings import settings
 from src.graph.types import State
+from src.utils.logger import setup_colorful_logger, print_stage_header, print_metric, print_success
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure colorful logging
+setup_colorful_logger(log_level=settings.LOG_LEVEL, verbose=settings.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -30,24 +28,25 @@ async def run_news_collection(
         date: Target date (defaults to today)
         max_iterations: Maximum iterations (defaults to config)
     """
-    print("=" * 60)
-    print("Multi-Agent News Collection System")
-    print("=" * 60)
-    print()
-    
-    # Display configuration
-    settings.display()
-    
+    print_stage_header("SYSTEM", "Multi-Agent News Collection System")
+
+    # Display configuration (quietly)
+    # settings.display()
+
     # Create workflow
     logger.info("Initializing workflow...")
     workflow = create_workflow()
-    logger.info("Workflow initialized successfully")
-    print()
-    
+    logger.info("Workflow initialized")
+
     # Prepare initial state
     if date is None:
         date = datetime.now().strftime("%Y-%m-%d")
-    
+
+    print_metric("Task", task)
+    print_metric("Date", date)
+    print_metric("Max Iterations", max_iterations or settings.MAX_ITERATIONS)
+    print()
+
     initial_state: State = {
         "task": task,
         "date": date,

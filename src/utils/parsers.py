@@ -4,7 +4,10 @@ import httpx
 from typing import List
 import os
 import random
+import logging
 from playwright.async_api import async_playwright
+
+logger = logging.getLogger(__name__)
  
 def _extract_baidu_hot_search_links(html_content: str, n: int = 1) -> list[dict]:
     """
@@ -21,7 +24,7 @@ def _extract_baidu_hot_search_links(html_content: str, n: int = 1) -> list[dict]
     
     result_blocks = soup.find_all('div', class_='result c-container xpath-log new-pmd', limit=n)
 
-    print(f"[DEBUG] Found {len(result_blocks)} result blocks")
+    logger.debug(f"Found {len(result_blocks)} result blocks")
 
     links = []
     for block in result_blocks:
@@ -35,7 +38,7 @@ def _extract_baidu_hot_search_links(html_content: str, n: int = 1) -> list[dict]
             item["img"] = img['src'] # 提取图片链接
         links.append(item)
 
-    print(f"[DEBUG] Extracted {len(links)} valid links")
+    logger.debug(f"Extracted {len(links)} valid links")
 
     return links
 
@@ -207,15 +210,15 @@ async def mining_from_serch_with_browser(platform: str, url: str, limit: int = 1
                 debug_html_file = '/tmp/crawler_debug/baidu_debug.html'
                 with open(debug_html_file, 'w', encoding='utf-8') as f:
                     f.write(html_content)
-                print(f"[DEBUG] Saved HTML to {debug_html_file}")
+                logger.debug(f"Saved HTML to {debug_html_file}")
                 
                 # 保存截图
                 debug_screenshot_file = '/tmp/crawler_debug/baidu_debug.png'
                 await page.screenshot(path=debug_screenshot_file, full_page=True)
-                print(f"[DEBUG] Saved screenshot to {debug_screenshot_file}")
+                logger.debug(f"Saved screenshot to {debug_screenshot_file}")
             
             # 使用对应平台的解析器
-            print(f"[DEBUG] Parsing HTML content, length: {len(html_content)} chars")
+            logger.debug(f"Parsing HTML content, length: {len(html_content)} chars")
             extractor = HIT_WEBSITES[platform](html_content, n=limit)
             if extractor and len(extractor) > 0:
                 mining_results.extend(extractor)
@@ -290,7 +293,7 @@ def _is_security_challenge(html_content: str, response_url: str = "") -> bool:
     return False
 
 
-async def mining_from_serch(platform: str, client: httpx.AsyncClient, header: dict, url: str, limit: int = 1, use_browser: bool = False, interactive: bool = True) -> List[dict]:
+async def mining_from_serch(platform: str, client: httpx.AsyncClient, header: dict, url: str, limit: int = 1, use_browser: bool = False, interactive: bool = True, silent: bool = False) -> List[dict]:
     """
     从搜索页面中提取链接信息
     优化策略：优先使用快速的 HTTP 请求，只有在检测到安全验证时才切换到浏览器模式
@@ -303,6 +306,7 @@ async def mining_from_serch(platform: str, client: httpx.AsyncClient, header: di
         limit: 提取数量限制
         use_browser: 是否强制使用浏览器模式（默认 False，自动检测）
         interactive: 浏览器模式下是否启用交互式验证码处理
+        silent: 是否静默模式（不输出中间日志）
 
     Returns:
         提取的链接信息列表
@@ -315,11 +319,13 @@ async def mining_from_serch(platform: str, client: httpx.AsyncClient, header: di
     
     # 如果强制使用浏览器模式，直接调用浏览器方法
     if use_browser:
-        print("🌐 强制使用浏览器模式")
+        if not silent:
+            print("🌐 强制使用浏览器模式")
         return await mining_from_serch_with_browser(platform, url, limit, interactive=interactive)
-    
+
     # 第一步：尝试使用快速的 HTTP 请求
-    print(f"⚡ 尝试快速 HTTP 请求: {url[:80]}...")
+    if not silent:
+        print(f"⚡ 尝试快速 HTTP 请求: {url[:80]}...")
     
     # 随机延迟，避免请求过快
     await asyncio.sleep(random.uniform(0.5, 1.5))
@@ -347,29 +353,36 @@ async def mining_from_serch(platform: str, client: httpx.AsyncClient, header: di
         if _is_security_challenge(html_content, final_url):
             # 如果 interactive 为 False，则不切换到浏览器模式
             if not interactive:
-                print("⚠️  检测到安全验证，但 interactive=False，返回原始 URL")
+                if not silent:
+                    print("⚠️  检测到安全验证，但 interactive=False，返回原始 URL")
                 mining_results.append({"url": url})
                 return mining_results
-            
-            print("⚠️  检测到安全验证，自动切换到浏览器模式...")
+
+            if not silent:
+                print("⚠️  检测到安全验证，自动切换到浏览器模式...")
             return await mining_from_serch_with_browser(platform, url, limit, interactive=interactive)
-        
+
         # 未检测到安全验证，继续使用 HTTP 请求提取内容
-        print("✅ HTTP 请求成功，未检测到安全验证")
+        if not silent:
+            print("✅ HTTP 请求成功，未检测到安全验证")
         extractor = HIT_WEBSITES[platform](html_content, n=limit)
-        
+
         if extractor and len(extractor) > 0:
             mining_results.extend(extractor)
-            print(f"✅ 成功提取 {len(extractor)} 条内容 (HTTP 模式)")
+            if not silent:
+                print(f"✅ 成功提取 {len(extractor)} 条内容 (HTTP 模式)")
         else:
-            print(f"⚠️  未提取到内容，返回原始 URL")
+            if not silent:
+                print(f"⚠️  未提取到内容，返回原始 URL")
             mining_results.append({"url": url})
             
     except httpx.HTTPStatusError as e:
         # HTTP 状态错误，可能是反爬虫机制
-        print(f"⚠️  HTTP 请求失败 (状态码 {e.response.status_code})，切换到浏览器模式...")
+        if not silent:
+            print(f"⚠️  HTTP 请求失败 (状态码 {e.response.status_code})，切换到浏览器模式...")
         if interactive is False:
-            print("⚠️  interactive=False，返回原始 URL")
+            if not silent:
+                print("⚠️  interactive=False，返回原始 URL")
             mining_results.append({"url": url})
             return mining_results
         return await mining_from_serch_with_browser(platform, url, limit, interactive=interactive)

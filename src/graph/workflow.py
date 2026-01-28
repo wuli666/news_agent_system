@@ -30,15 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 def route_supervisor(state: State) -> str:
-    """
-    Main supervisor routing function.
-
-    Routes to:
-    - news_collector: collect raw news pool
-    - collection_team: process news batch (subgraph)
-    - analysis_team: analyze news (subgraph with inner loop)
-    - summary_team: generate final report (subgraph)
-    """
+    """Main supervisor routing function."""
     decision = state.get("supervisor_decision", "collect")
 
     if decision == "collect":
@@ -55,11 +47,7 @@ def route_supervisor(state: State) -> str:
 
 
 def prepare_collection_team_input(state: State) -> CollectionTeamState:
-    """
-    Prepare input for collection team subgraph.
-
-    Maps main State -> CollectionTeamState.
-    """
+    """Prepare input for collection team subgraph."""
     return {
         "input_batch": state.get("latest_news_batch", []),
         "task": state.get("task", ""),
@@ -75,11 +63,7 @@ def prepare_collection_team_input(state: State) -> CollectionTeamState:
 
 
 def prepare_analysis_team_input(state: State) -> AnalysisTeamState:
-    """
-    Prepare input for analysis team subgraph.
-
-    Maps main State -> AnalysisTeamState.
-    """
+    """Prepare input for analysis team subgraph."""
     return {
         "text_news": state.get("text_news", []),
         "date": state.get("date", ""),
@@ -98,11 +82,7 @@ def prepare_analysis_team_input(state: State) -> AnalysisTeamState:
 
 
 def prepare_summary_team_input(state: State) -> SummaryTeamState:
-    """
-    Prepare input for summary team subgraph.
-
-    Maps main State -> SummaryTeamState.
-    """
+    """Prepare input for summary team subgraph."""
     return {
         "task": state.get("task", ""),
         "date": state.get("date", ""),
@@ -122,9 +102,7 @@ def prepare_summary_team_input(state: State) -> SummaryTeamState:
 
 
 def merge_collection_team_output(main_state: State, team_state: CollectionTeamState) -> State:
-    """
-    Merge collection team output back to main state.
-    """
+    """Merge collection team output back to main state."""
     return {
         **main_state,
         "text_news": team_state.get("text_news", []),
@@ -136,9 +114,7 @@ def merge_collection_team_output(main_state: State, team_state: CollectionTeamSt
 
 
 def merge_analysis_team_output(main_state: State, team_state: AnalysisTeamState) -> State:
-    """
-    Merge analysis team output back to main state.
-    """
+    """Merge analysis team output back to main state."""
     return {
         **main_state,
         "research_notes": team_state.get("research_notes", []),
@@ -156,53 +132,29 @@ def merge_analysis_team_output(main_state: State, team_state: AnalysisTeamState)
 
 
 def merge_summary_team_output(main_state: State, team_state: SummaryTeamState) -> State:
-    """
-    Merge summary team output back to main state.
-    """
+    """Merge summary team output back to main state."""
     return {
         **main_state,
         "timeline_analysis": team_state.get("timeline_analysis"),
         "trend_analysis": team_state.get("trend_analysis"),
         "timeline_chart_path": team_state.get("timeline_chart_path"),
         "final_report": team_state.get("final_report"),
-        # 保留叶子节点写入的结束时间和 last_agent（writer 会填充）
         "completed_at": team_state.get("completed_at", main_state.get("completed_at")),
         "last_agent": team_state.get("last_agent", main_state.get("last_agent", "summary_team")),
     }
 
 
 def create_workflow():
-    """
-    Create the subgraph-based LangGraph workflow.
-
-    Architecture:
-        coordinator -> main_supervisor (decision hub) -> [teams] -> END
-
-    Teams (as subgraphs):
-        - collection_team: [text_collector ∥ video_collector] (parallel)
-        - analysis_team: [research ∥ sentiment ∥ relationship] -> reflect (with inner loop)
-        - summary_team: timeline -> trend -> chart -> writer (sequential)
-
-    Benefits:
-        - Clean state isolation
-        - Modular team logic
-        - Inner loops contained
-        - Easy to test teams independently
-    """
+    """Create the subgraph-based LangGraph workflow."""
     workflow = StateGraph(State)
 
-    # ===== Core Control Nodes =====
     workflow.add_node("coordinator", coordinator_node)
     workflow.add_node("main_supervisor", main_supervisor_node)
     workflow.add_node("news_collector", news_collector_node)
 
-    # ===== Team Subgraphs =====
-    # Create subgraph instances
     collection_team_graph = create_collection_team()
     analysis_team_graph = create_analysis_team()
     summary_team_graph = create_summary_team()
-
-    # Wrap subgraphs with state mapping (async to support async subgraph nodes)
     async def collection_team_node(state: State):
         """Wrapper for collection team subgraph."""
         logger.info("=== Invoking Collection Team Subgraph ===")
@@ -224,19 +176,14 @@ def create_workflow():
         team_output = await summary_team_graph.ainvoke(team_input)
         return merge_summary_team_output(state, team_output)
 
-    # Add wrapped subgraphs as nodes
     workflow.add_node("collection_team", collection_team_node)
     workflow.add_node("analysis_team", analysis_team_node)
     workflow.add_node("summary_team", summary_team_node)
 
-    # ===== Entry Point =====
     workflow.set_entry_point("coordinator")
 
-    # ===== Core Flow =====
     workflow.add_edge("coordinator", "main_supervisor")
     workflow.add_edge("news_collector", "main_supervisor")
-
-    # Supervisor routes to teams or news_collector
     workflow.add_conditional_edges(
         "main_supervisor",
         route_supervisor,
@@ -245,24 +192,15 @@ def create_workflow():
             "collection_team": "collection_team",
             "analysis_team": "analysis_team",
             "summary_team": "summary_team",
-            "main_supervisor": "main_supervisor",  # For re-entry
+            "main_supervisor": "main_supervisor",
         }
     )
 
-    # Teams return to supervisor (except summary which ends)
     workflow.add_edge("collection_team", "main_supervisor")
     workflow.add_edge("analysis_team", "main_supervisor")
     workflow.add_edge("summary_team", END)
 
-    # ===== Compile =====
-    compiled_workflow = workflow.compile()
-
-    logger.info("Subgraph-based workflow created successfully")
-    logger.info("Architecture: coordinator -> supervisor -> [3 team subgraphs] -> END")
-    logger.info("Main workflow: 8 nodes (3 core + 3 teams + coordinator + supervisor)")
-    logger.info("Each team subgraph contains 4-6 internal nodes")
-
-    return compiled_workflow
+    return workflow.compile()
 
 
 if __name__ == "__main__":

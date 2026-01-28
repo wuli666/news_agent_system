@@ -21,7 +21,15 @@
       "Bash(cat:*)",
       "Bash(git remote set-url:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(head:*)",
+      "Bash(ls:*)",
+      "Bash(tree:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(curl:*)",
+      "Bash(source ~/anaconda3/etc/profile.d/conda.sh)",
+      "Bash(~/anaconda3/envs/py3111/bin/python:*)",
+      "Bash(source .env)"
     ],
     "deny": [],
     "ask": []

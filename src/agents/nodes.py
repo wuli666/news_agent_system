@@ -33,7 +33,11 @@ import matplotlib.pyplot as plt
 from langchain_core.messages import HumanMessage, ToolMessage, SystemMessage
 from langgraph.types import Command
 
-from src.graph.types import NewsItem, State, NewsReport, ReflectionResult, InformationGap
+from src.graph.types import (
+    NewsItem, State, NewsReport, ReflectionResult, InformationGap,
+    Overview, CoreTheme, KeyEvent, SentimentRiskItem, TrendPrediction,
+    SentimentDistribution
+)
 from src.llms.llm import get_llm_by_type
 from langgraph.prebuilt import create_react_agent
 from src.config.agents import AGENT_LLM_MAP
@@ -43,6 +47,7 @@ from src.services.newsnow_service import STOPWORDS, NewsNowService
 from src.utils.news_dedup import deduplicate_news
 from src.tools.news_tools import tavily_search, tavily_extract
 from langchain_community.utilities import ArxivAPIWrapper
+from src.utils.logger import print_stage_header, print_substage, print_metric, print_success, print_warning
 
 
 async def _run_tavily_search(query: str, max_results: int = 5, include_answer: bool = True) -> Dict[str, Any]:
@@ -2099,7 +2104,7 @@ async def coordinator_node(state: State):
     """
     Initialize the system and preload tools.
     """
-    logger.info("=== Coordinator: Initializing system ===")
+    print_stage_header("COORDINATOR", "Initializing System")
 
     from src.tools import ALL_NEWS_TOOLS
 
@@ -2147,7 +2152,7 @@ async def news_collector_node(state: State):
     - Extract trending keywords
     - Prepare news pool
     """
-    logger.info("=== News Collector: Fetching news data ===")
+    print_stage_header("COLLECTOR", "Fetching News Data")
 
     try:
         # Fetch daily papers (optional)
@@ -2161,7 +2166,9 @@ async def news_collector_node(state: State):
         )
 
         raw_items = news_result.get("items") or []
-        logger.info(f"Fetched {len(raw_items)} raw news items from {len(news_result.get('platforms', []))} platforms")
+        print_substage("Fetching", "done")
+        print_metric("Raw Items", len(raw_items))
+        print_metric("Platforms", len(news_result.get('platforms', [])))
 
         # Deduplicate
         dedup_result = deduplicate_news(
@@ -2170,7 +2177,9 @@ async def news_collector_node(state: State):
             keep_duplicates_info=True
         )
         dedup_items = dedup_result.get("items", [])
-        logger.info(f"After deduplication: {len(dedup_items)} items (removed {dedup_result.get('removed_duplicates', 0)} duplicates)")
+        print_substage("Deduplication", "done")
+        print_metric("Unique Items", len(dedup_items))
+        print_metric("Removed Duplicates", dedup_result.get('removed_duplicates', 0))
 
         # 若上游无时间或仅有统一的 retrieved_at，按排名轻微错开时间，避免时间线全相同
         base_ts = datetime.now(timezone.utc).replace(microsecond=0)
@@ -2214,8 +2223,29 @@ async def news_collector_node(state: State):
         # Apply hotness scores
         news_pool = _apply_hotness_scores(normalized, trending_keywords)
 
-        logger.info(f"News pool prepared with {len(news_pool)} items")
-        logger.info(f"Top keywords: {[kw.get('keyword') for kw in (trending_keywords or [])[:5]]}")
+        print_substage("Keyword Extraction", "done")
+        print_metric("News Pool Size", len(news_pool))
+        top_kws = [kw.get('keyword') for kw in (trending_keywords or [])[:3]]
+        if top_kws:
+            print_metric("Top Keywords", ", ".join(top_kws))
+
+        # GraphRAG: Ingest top hot news into knowledge graph
+        graphrag_indexed = 0
+        try:
+            from src.graphrag.config import get_config
+            graphrag_config = get_config()
+            if graphrag_config.ENABLED and graphrag_config.AUTO_INGEST:
+                from src.tools.graphrag_tool import graphrag_ingest
+                ingest_result = await graphrag_ingest.ainvoke({
+                    "news_items": news_pool,
+                    "top_k": 20,  # Only ingest top 20 hot news
+                    "extract": True
+                })
+                graphrag_indexed = ingest_result.get("indexed_count", 0)
+                if graphrag_indexed > 0:
+                    print_success(f"GraphRAG: Ingested {graphrag_indexed} items into knowledge graph")
+        except Exception as e:
+            logger.warning(f"GraphRAG ingest skipped: {e}")
 
         return Command(update={
             "news_pool": news_pool,
@@ -2223,6 +2253,7 @@ async def news_collector_node(state: State):
             "trending_keywords": trending_keywords,
             "last_agent": "collector",
             "daily_papers": daily_papers,
+            "graphrag_indexed": graphrag_indexed,
         }, goto="main_supervisor")
 
     except Exception as exc:
@@ -2249,7 +2280,8 @@ async def main_supervisor_node(state: State):
     - Data fetching (done by collector)
     - Detailed routing (done by team coordinators)
     """
-    logger.info(f"=== Main Supervisor: Evaluating (Iteration {state['iteration']}) ===")
+    iteration = state.get("iteration", 0)
+    print_stage_header("SUPERVISOR", f"Evaluating (Iteration {iteration})")
 
     iteration = state.get("iteration", 0)
     max_iterations = state.get("max_iterations", 3)
@@ -2268,7 +2300,9 @@ async def main_supervisor_node(state: State):
     target_total = min_text + min_video
     quality_score = min(1.0, (text_news_count + video_news_count) / float(target_total))
 
-    logger.info(f"Quality: {quality_score:.2f} | Text: {text_news_count}/{min_text} | Video: {video_news_count}/{min_video}")
+    print_metric("Quality Score", f"{quality_score:.2f}")
+    print_metric("Text News", f"{text_news_count}/{min_text}")
+    print_metric("Video News", f"{video_news_count}/{min_video}")
 
     # Decision logic
     decision = ""
@@ -2374,7 +2408,9 @@ async def main_supervisor_node(state: State):
             feedback = "继续收集"
             iteration += 1
 
-    logger.info(f"Decision: {decision} -> {next_node} | Feedback: {feedback}")
+    print_success(f"Decision: {decision} → {next_node}")
+    if feedback:
+        print_metric("Feedback", feedback)
 
     return Command(update={
         "iteration": iteration,
@@ -3504,6 +3540,7 @@ async def summary_writer_agent_node(state: State):
     ]
     xueqiu_titles = "\n".join([f"- {item.get('title', '')}" for item in xueqiu_news[:15]]) if xueqiu_news else "暂无雪球数据"
 
+
     # Prepare context for structured output
     context_message = f"""生成最终新闻报告：
 
@@ -3515,25 +3552,25 @@ async def summary_writer_agent_node(state: State):
 
 分析内容：
 【文字分析】
-{text_analysis[:500]}
+{text_analysis[:800] if text_analysis else "暂无分析"}
 
 【视频分析】
-{video_analysis[:500]}
+{video_analysis[:800] if video_analysis else "暂无分析"}
 
 【背景研究】
-{research_text[:500]}
+{research_text[:800] if research_text else "暂无研究"}
 
 【情感分析】
-{sentiment[:300]}
+{sentiment[:500] if sentiment else "暂无分析"}
 
 【关系图】
-{relationship}
+{relationship if relationship else "暂无关系图"}
 
 【时间线】
-{timeline[:300]}
+{timeline[:500] if timeline else "暂无时间线"}
 
 【趋势分析】
-{trend[:300]}
+{trend[:500] if trend else "暂无趋势分析"}
 
 【雪球股票热榜】（从以下标题中提取股票名称、涨跌趋势、热度）
 {xueqiu_titles}
@@ -3544,7 +3581,8 @@ async def summary_writer_agent_node(state: State):
 2. overview.text_news 必须填写 {text_count}
 3. overview.video_news 必须填写 {video_count}
 4. timeline_analysis、trend_analysis、relationship_graph 字段直接复用或凝练上面的对应分析，避免留空。
-5. stocks 字段：如果有雪球数据，请从标题中提取股票信息（股票名称、涨跌趋势、热度评分等）；如果没有雪球数据，返回空数组 []。"""
+5. stocks 字段：如果有雪球数据，请从标题中提取股票信息（股票名称、涨跌趋势、热度评分等）；如果没有雪球数据，返回空数组 []。
+6. 即使分析内容不足，也请尽力提取关键信息生成报告，不要返回空对象。"""
 
     try:
         # Use structured output with Pydantic schema
@@ -3556,9 +3594,29 @@ async def summary_writer_agent_node(state: State):
             HumanMessage(content=context_message)
         ]
 
-        report_obj: NewsReport = await structured_llm.ainvoke(messages)
-        if report_obj is None:
-            raise ValueError("Structured report is empty")
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    logger.info(f"Retry attempt {attempt + 1}/{max_retries}")
+
+                report_obj: NewsReport = await structured_llm.ainvoke(messages)
+
+                if report_obj is None:
+                    raise ValueError("LLM returned None for structured report")
+
+                if not report_obj.core_themes and not report_obj.key_events:
+                    raise ValueError("Structured report has no core_themes or key_events")
+
+                break
+
+            except Exception as e:
+                logger.warning(f"LLM call attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    import asyncio
+                    await asyncio.sleep(2)
+                else:
+                    raise
 
         # 补充关键分析字段，避免模型遗漏
         # 同时强制修正 overview 中的新闻统计数字（LLM 可能填错）
@@ -3633,54 +3691,90 @@ async def summary_writer_agent_node(state: State):
 
     except Exception as exc:
         error_str = str(exc)
+        logger.error(f"Summary writer failed: {exc}", exc_info=True)
 
-        # 检查是否是内容审核错误
-        if "data_inspection_failed" in error_str or "inappropriate content" in error_str:
-            logger.warning(f"⚠️ Content moderation triggered in summary writer, using fallback report")
+        logger.warning("Creating minimal fallback report due to LLM failure")
 
-            # Fallback: 生成基础的文本报告（不使用 LLM 结构化输出）
-            fallback_report = f"""# 新闻日报
+        text_news = state.get("text_news", [])
+        video_news = state.get("video_news", [])
+        sample_titles = [item.get("title", "") for item in text_news[:10] if item.get("title")]
 
-**日期**: {state.get("date", datetime.now().strftime("%Y-%m-%d"))}
-**任务**: {state.get("task", "")}
+        keywords_counter = Counter()
+        for item in text_news[:50]:
+            title = item.get("title", "")
+            words = re.findall(r'[\w\u4e00-\u9fff]+', title)
+            for word in words:
+                if len(word) > 1 and word not in STOPWORDS:
+                    keywords_counter[word] += 1
 
-## 数据概览
+        top_keywords = [kw for kw, _ in keywords_counter.most_common(10)]
+        if not top_keywords:
+            top_keywords = ["数据收集", "新闻", "分析", "今日", "热点"]
 
-- 文字新闻: {text_count} 条
-- 视频新闻: {video_count} 条
+        fallback_obj = NewsReport(
+            overview=Overview(
+                total_news=text_count + video_count,
+                text_news=text_count,
+                video_news=video_count,
+                sentiment_distribution=SentimentDistribution(
+                    positive=33,
+                    neutral=34,
+                    negative=33
+                ),
+                top_keywords=top_keywords,
+                summary=f"今日共收集 {text_count + video_count} 条新闻（文字 {text_count} 条，视频 {video_count} 条）。"
+            ),
+            core_themes=[
+                CoreTheme(
+                    theme="数据收集完成",
+                    heat_level=3,
+                    examples=sample_titles[:3] if sample_titles else ["新闻收集完成"],
+                    attention="中等"
+                )
+            ],
+            key_events=[
+                KeyEvent(
+                    title=title,
+                    time="今日",
+                    summary="详细分析暂不可用，请重新运行系统生成完整报告。",
+                    impact="待分析",
+                    risk_level="中",
+                    category="未分类"
+                ) for title in sample_titles[:5]
+            ] if sample_titles else [
+                KeyEvent(
+                    title="新闻收集完成",
+                    time="今日",
+                    summary=f"系统已收集 {text_count + video_count} 条新闻，但LLM分析失败。",
+                    impact="数据已就绪",
+                    risk_level="低",
+                    category="系统状态"
+                )
+            ],
+            sentiment_risk=[
+                SentimentRiskItem(
+                    title=title,
+                    sentiment="中性",
+                    risk="待分析",
+                    severity="中"
+                ) for title in sample_titles[:8]
+            ] if sample_titles else [],
+            trends=[
+                TrendPrediction(
+                    dimension="新闻趋势",
+                    short_term="数据收集完成，详细分析暂不可用",
+                    long_term="建议重新运行以生成完整报告"
+                )
+            ],
+            stocks=[],
+            executive_summary=f"今日共收集 {text_count + video_count} 条新闻。报告生成遇到技术问题（{str(exc)[:100]}），请检查日志或重新运行系统。",
+            timeline_analysis=timeline if timeline else "暂无时间线分析",
+            trend_analysis=trend if trend else "暂无趋势分析",
+            relationship_graph=relationship if relationship else "暂无关系图谱"
+        )
 
-## 分析内容
-
-### 时间线分析
-{timeline}
-
-### 趋势分析
-{trend}
-
-### 关系图谱
-{relationship}
-
-### 情感分析
-{sentiment}
-
----
-**注**: 由于内容审核限制，本报告采用基础格式。详细的结构化分析暂时无法生成。
-"""
-            logger.info(f"Using fallback text report: {len(fallback_report)} chars")
-
-        else:
-            # 其他错误
-            logger.error(f"Summary writer failed: {exc}", exc_info=True)
-            fallback_report = f"""# 报告生成失败
-
-**错误信息**: {str(exc)}
-
-**收集数据**:
-- 文字新闻: {text_count} 条
-- 视频新闻: {video_count} 条
-
-请检查日志获取详细信息。
-"""
+        fallback_report = json.dumps(fallback_obj.model_dump(), indent=2, ensure_ascii=False)
+        logger.info(f"Generated fallback JSON report: {len(fallback_report)} chars")
 
         # 保存 fallback 报告到 HTML
         try:

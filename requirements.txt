@@ -23,3 +23,9 @@ colorlog>=6.0.0
 
 # Graph visualization
 pyvis>=0.3.2
+
+# GraphRAG Module
+zep-cloud>=3.0.0  # Zep Cloud for knowledge graph
+chonkie>=0.1.0  # Text chunking for RAG
+flask>=3.0.0  # GraphRAG API server
+flask-cors>=4.0.0  # CORS support

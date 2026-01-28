@@ -12,6 +12,7 @@ from .news_tools import (
     ALL_NEWS_TOOLS,
 )
 from .python_repl_tool import python_repl_tool
+from .graphrag_tool import graphrag_ingest, graphrag_query
 
 __all__ = [
     "get_latest_news",
@@ -23,4 +24,6 @@ __all__ = [
     "tavily_extract",
     "ALL_NEWS_TOOLS",
     "python_repl_tool",
+    "graphrag_ingest",
+    "graphrag_query",
 ]
